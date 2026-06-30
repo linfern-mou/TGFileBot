@@ -20,6 +20,7 @@ type Task struct {
 	ContentEnd   int64       // 任务请求的数据终点（绝对位置）
 	Version      int64       // 任务对应的文件版本号, 用于处理引用过期
 	Error        error       // 下载过程中产生的错误
+	Done         bool        // 是否已成功
 	Content      chan []byte // 下载到的二进制内容
 }
 
@@ -170,6 +171,7 @@ func (stream *Stream) download(numTask int, contentStart, contentEnd int64) {
 			// 从缓存读取
 			found := stream.handleCache(task, cacheKey, offset, contentEnd)
 			if found {
+				task.Done = true
 				break
 			}
 
@@ -191,7 +193,9 @@ func (stream *Stream) download(numTask int, contentStart, contentEnd int64) {
 			// 首次尝试给更长超时，容忍冷启动 TCP 连接重建 + TLS + MTProto 认证
 			timeout := 8 * time.Second
 
-			content, fileName, err := stream.Client.DownloadChunk(src, int(task.ContentStart), int(task.ContentEnd)+1, int(chunkSize), false, stream.Ctx, timeout)
+			ctx, cancel := context.WithTimeout(stream.Ctx, timeout)
+			content, fileName, err := stream.Client.DownloadChunk(src, int(task.ContentStart), int(task.ContentEnd)+1, int(chunkSize), false, ctx, timeout)
+			cancel()
 			if err != nil {
 				errStr := strings.ToLower(err.Error())
 				switch {
@@ -348,11 +352,12 @@ func (stream *Stream) download(numTask int, contentStart, contentEnd int64) {
 			}
 
 			task.handleContent(content, offset, contentEnd)
+			task.Done = true
 			break
 		}
 
 		// 检查循环退出后是否成功
-		if task.Content == nil && task.Error == nil {
+		if !task.Done && task.Error == nil {
 			task.Error = fmt.Errorf("下载失败, 已达最大重试次数: %d", maxCount)
 			close(task.Content)
 			return

@@ -352,130 +352,148 @@ func handleStream(w http.ResponseWriter, r *http.Request) {
 
 	size := src.File.Size
 	fileName := src.File.Name
-
-	// 创建新的 Stream 流管理对象
-	stream := newStream(r.Context(), infos.Client, src.Media(), infos.Conf.Workers, params.MID, params.CID, src.File.Size, fileName)
-
-	// 如果是转发的消息, 重定向源频道以确保分片下载稳定性
-	if src.Message.FwdFrom != nil {
-		if ch, ok := src.Message.FwdFrom.FromID.(*telegram.PeerChannel); ok {
-			stream.CID = ch.ChannelID
-			stream.MID = src.Message.FwdFrom.ChannelPost
+	if size < infos.Conf.MaxSize*int64(infos.Conf.Workers) {
+		clientIP := GetClientIP(r)
+		log.Printf("正在处理来自 %s 的请求, 开始下载, cid=%d, mid=%d, name=%s", clientIP, params.CID, params.MID, fileName)
+		buf := new(bytes.Buffer)
+		_, err = infos.Client.DownloadMedia(src.Media(), &telegram.DownloadOptions{
+			Buffer:    buf,
+			Ctx:       r.Context(),
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
-	}
-
-	// 6. 设置 HTTP 响应头
-	w.Header().Set("Accept-Ranges", "bytes") // 启用 Range 支持
-	w.Header().Set("Content-Type", handleMediaCate(fileName))
-
-	disposition := "inline"
-	if r.URL.Query().Get("download") == "true" {
-		disposition = "attachment" // 附件模式下载
-	}
-	w.Header().Set("Content-Disposition", fmt.Sprintf("%s; filename=\"%s\"", disposition, fileName))
-
-	// 7. 处理 HTTP Range 请求（分段读取的核心逻辑）
-	ranHeader := r.Header.Get("Range")
-	start, end := handleRanHeader(ranHeader, size)
-
-	if ranHeader == "" {
-		w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
-		w.WriteHeader(http.StatusOK)
+		w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
+		w.Write(buf.Bytes())
 	} else {
-		contentLength := end - start + 1
-		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, size))
-		w.Header().Set("Content-Length", strconv.FormatInt(contentLength, 10))
-		w.WriteHeader(http.StatusPartialContent)
-	}
+		// 创建新的 Stream 流管理对象
+		stream := newStream(r.Context(), infos.Client, src.Media(), infos.Conf.Workers, params.MID, params.CID, src.File.Size, fileName)
 
-	// 提前发送 Header，重置客户端(ExoPlayer)连接超时倒计时
-	if flusher, ok := w.(http.Flusher); ok {
-		flusher.Flush()
-	}
-
-	// 如果是 HEAD 请求, 只返回首部信息后提早结束避免开启流媒体下载协程
-	if r.Method == http.MethodHead {
-		return
-	}
-
-	clientIP := GetClientIP(r)
-	log.Printf("正在处理来自 %s 的请求, 开始下载, cid=%d, mid=%d, name=%s, start=%d, end=%d", clientIP, params.CID, params.MID, fileName, start, end)
-
-	// 缓存逻辑：检查头部/尾部缓存是否命中, 并决定实际下载起点
-	stream.HeadSize, stream.TailSize = mediaCacheSizes(size)
-
-	// 启动并发下载协程
-	go stream.start(start, end)
-	defer func() {
-		stream.clean()
-		switch cate {
-		case "user":
-			infos.TCPStatus.User.WakeTime = time.Now()
-		case "bot":
-			infos.TCPStatus.Bot.WakeTime = time.Now()
+		// 如果是转发的消息, 重定向源频道以确保分片下载稳定性
+		if src.Message.FwdFrom != nil {
+			if ch, ok := src.Message.FwdFrom.FromID.(*telegram.PeerChannel); ok {
+				stream.CID = ch.ChannelID
+				stream.MID = src.Message.FwdFrom.ChannelPost
+			}
 		}
-	}()
 
-	// 10. 循环从下载管道读取分片并写入 HTTP 响应体
-	if r.Method == http.MethodGet {
-		// 首个分片给更长超时，容忍冷启动 Telegram 连接重建延迟
-		timer := time.NewTimer(60 * time.Second)
-		defer timer.Stop()
-		for {
-			select {
-			case <-r.Context().Done():
-				// 客户端断开连接（如浏览器关闭或拖动进度条导致旧请求作废）
-				if infos.Conf.DeBUG {
-					log.Printf("流式传输文件已取消: cid=%d, mid=%d, name=%s", params.CID, params.MID, fileName)
-				}
-				return
-			case task := <-stream.Tasks:
-				// 读取一个下载好的分片任务
-				if task == nil {
-					log.Printf("流式传输文件出错: cid=%d, mid=%d, name=%s, error=任务为空", params.CID, params.MID, fileName)
-					continue
-				}
+		// 6. 设置 HTTP 响应头
+		w.Header().Set("Accept-Ranges", "bytes") // 启用 Range 支持
+		w.Header().Set("Content-Type", handleMediaCate(fileName))
 
-				if task.Error != nil {
-					log.Printf("切片下载出错: cid=%d, mid=%d, start=%d, end=%d, name=%s, error=%+v", params.CID, params.MID, task.ContentStart, task.ContentEnd, fileName, task.Error)
-					return
-				}
-				// 等待任务完成或者客户端断开
+		disposition := "inline"
+		if r.URL.Query().Get("download") == "true" {
+			disposition = "attachment" // 附件模式下载
+		}
+		w.Header().Set("Content-Disposition", fmt.Sprintf("%s; filename=\"%s\"", disposition, fileName))
+
+		// 7. 处理 HTTP Range 请求（分段读取的核心逻辑）
+		ranHeader := r.Header.Get("Range")
+		start, end := handleRanHeader(ranHeader, size)
+
+		if ranHeader == "" {
+			w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+			w.WriteHeader(http.StatusOK)
+		} else {
+			contentLength := end - start + 1
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, size))
+			w.Header().Set("Content-Length", strconv.FormatInt(contentLength, 10))
+			w.WriteHeader(http.StatusPartialContent)
+		}
+
+		// 提前发送 Header，重置客户端(ExoPlayer)连接超时倒计时
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+
+		// 如果是 HEAD 请求, 只返回首部信息后提早结束避免开启流媒体下载协程
+		if r.Method == http.MethodHead {
+			return
+		}
+
+		clientIP := GetClientIP(r)
+		log.Printf("正在处理来自 %s 的请求, 开始下载, cid=%d, mid=%d, name=%s, start=%d, end=%d", clientIP, params.CID, params.MID, fileName, start, end)
+
+		// 缓存逻辑：检查头部/尾部缓存是否命中, 并决定实际下载起点
+		stream.HeadSize, stream.TailSize = mediaCacheSizes(size)
+
+		// 启动并发下载协程
+		go stream.start(start, end)
+		defer func() {
+			stream.clean()
+			switch cate {
+			case "user":
+				infos.TCPStatus.User.WakeTime = time.Now()
+			case "bot":
+				infos.TCPStatus.Bot.WakeTime = time.Now()
+			}
+		}()
+
+		// 10. 循环从下载管道读取分片并写入 HTTP 响应体
+		if r.Method == http.MethodGet {
+			// 首个分片给更长超时，容忍冷启动 Telegram 连接重建延迟
+			timer := time.NewTimer(60 * time.Second)
+			defer timer.Stop()
+			for {
 				select {
 				case <-r.Context().Done():
+					// 客户端断开连接（如浏览器关闭或拖动进度条导致旧请求作废）
 					if infos.Conf.DeBUG {
 						log.Printf("流式传输文件已取消: cid=%d, mid=%d, name=%s", params.CID, params.MID, fileName)
 					}
 					return
-				case content, ok := <-task.Content:
-					if !ok {
-						if infos.Conf.DeBUG {
-							log.Printf("流式传输文件已完成: cid=%d, mid=%d, name=%s", params.CID, params.MID, fileName)
-						}
-						return
+				case task := <-stream.Tasks:
+					// 读取一个下载好的分片任务
+					if task == nil {
+						log.Printf("流式传输文件出错: cid=%d, mid=%d, name=%s, error=任务为空", params.CID, params.MID, fileName)
+						continue
 					}
 
-					// 写入响应
-					if len(content) > 0 {
-						if _, err := w.Write(content); err != nil {
-							log.Printf("写入文件流时出错: cid=%d, mid=%d, name=%s, err=%v", params.CID, params.MID, fileName, err)
-							return
-						}
-					}
-					// 检查是否已经写完当前请求的所有范围
-					if task.ContentEnd >= end {
-						if infos.Conf.DeBUG {
-							log.Printf("流式传输文件已完成: cid=%d, mid=%d, name=%s", params.CID, params.MID, fileName)
-						}
+					if task.Error != nil {
+						log.Printf("切片下载出错: cid=%d, mid=%d, start=%d, end=%d, name=%s, error=%+v", params.CID, params.MID, task.ContentStart, task.ContentEnd, fileName, task.Error)
 						return
 					}
-					task = nil
-					content = nil
-					timer.Reset(30 * time.Second)
+					// 等待任务完成或者客户端断开
+					select {
+					case <-r.Context().Done():
+						if infos.Conf.DeBUG {
+							log.Printf("流式传输文件已取消: cid=%d, mid=%d, name=%s", params.CID, params.MID, fileName)
+						}
+						return
+					case <-timer.C:
+						log.Printf("流式传输文件超时: cid=%d, mid=%d, name=%s", params.CID, params.MID, fileName)
+						return
+					case content, ok := <-task.Content:
+						if !ok {
+							if infos.Conf.DeBUG {
+								log.Printf("流式传输文件已完成: cid=%d, mid=%d, name=%s", params.CID, params.MID, fileName)
+							}
+							return
+						}
+
+						// 写入响应
+						if len(content) > 0 {
+							if _, err := w.Write(content); err != nil {
+								log.Printf("写入文件流时出错: cid=%d, mid=%d, name=%s, err=%v", params.CID, params.MID, fileName, err)
+								return
+							}
+						}
+						// 检查是否已经写完当前请求的所有范围
+						if task.ContentEnd >= end {
+							if infos.Conf.DeBUG {
+								log.Printf("流式传输文件已完成: cid=%d, mid=%d, name=%s", params.CID, params.MID, fileName)
+							}
+							return
+						}
+						task = nil
+						content = nil
+						timer.Reset(30 * time.Second)
+					}
+				case <-timer.C:
+					log.Printf("流式传输文件超时: cid=%d, mid=%d, name=%s", params.CID, params.MID, fileName)
+					return
 				}
-			case <-timer.C:
-				log.Printf("流式传输文件超时: cid=%d, mid=%d, name=%s", params.CID, params.MID, fileName)
-				return
 			}
 		}
 	}
