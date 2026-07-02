@@ -232,8 +232,8 @@ func GetClientIP(r *http.Request) string {
 	return "未知IP"
 }
 
-// evictOldestCache 当 cache map 超过 maxCount 时删除最旧的一条
-func evictOldestCache(cache map[string]*MediaCache, maxCount int) {
+// evictOldestMediaCache 当 cache map 超过 maxCount 时删除最旧的一条
+func evictOldestMediaCache(cache map[string]*MediaCache, maxCount int) {
 	if len(cache) <= maxCount {
 		return
 	}
@@ -253,6 +253,25 @@ func evictOldestCache(cache map[string]*MediaCache, maxCount int) {
 
 // evictOldestMsCache 当 cache map 超过 maxCount 时删除最旧的一条 (针对 MsCache)
 func evictOldestMsCache(cache map[string]*MsCache, maxCount int) {
+	if len(cache) <= maxCount {
+		return
+	}
+	var oldestKey string
+	var oldestTime time.Time
+	for k, v := range cache {
+		if oldestKey == "" || v.Time.Before(oldestTime) {
+			oldestKey = k
+			oldestTime = v.Time
+		}
+	}
+	if oldestKey != "" {
+		delete(cache, oldestKey)
+		log.Printf("消息缓存已淘汰最旧条目: key=%s", oldestKey)
+	}
+}
+
+// evictOldestChannelCache 当 cache map 超过 maxCount 时删除最旧的一条 (针对 ChannelInfo)
+func evictOldestChannelCache(cache map[string]*ChannelInfo, maxCount int) {
 	if len(cache) <= maxCount {
 		return
 	}

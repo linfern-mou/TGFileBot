@@ -871,23 +871,30 @@ func (infos *Infos) handleMs(cid int64, mid int32, cate string, params *telegram
 }
 
 // handleChannel 处理频道ID, 返回 InputPeer
-func (infos *Infos) handleChannel(channel string) (result ChannelInfo, err error) {
+func (infos *Infos) handleChannel(channel string, hash ...int64) (result ChannelInfo, err error) {
 	infos.Mutex.RLock()
-	result, ok := infos.ChannelID[channel]
+	cache, ok := infos.ChannelID[channel]
 	infos.Mutex.RUnlock()
 	if !ok {
 		src := strings.TrimPrefix(channel, "@")
 		if isAllNumber(src) {
+			if !strings.HasPrefix(src, "-100") {
+				src = "-100" + src
+			}
 			cid, err := strconv.ParseInt(src, 10, 64)
 			if err != nil {
 				log.Printf("频道 %s 解析失败: %+v", channel, err)
 				return result, err
 			}
 			result.CID = cid
-			result.Hash = 0
+			if len(hash) > 0 && hash[0] != 0 {
+				result.Hash = hash[0]
+			} else {
+				result.Hash = 0
+			}
 			result.Peer = &telegram.InputPeerUser{
 				UserID:     cid,
-				AccessHash: 0,
+				AccessHash: result.Hash,
 			}
 		} else {
 			values, err := infos.UserClient.ResolvePeer(channel)
@@ -910,36 +917,62 @@ func (infos *Infos) handleChannel(channel string) (result ChannelInfo, err error
 			case *telegram.InputPeerChat:
 				// 匹配到普通群
 				result.CID = value.ChatID
-				result.Hash = 0
+				if len(hash) > 0 && hash[0] != 0 {
+					result.Hash = hash[0]
+				} else {
+					result.Hash = 0
+				}
 				result.Peer = value
 			default:
 				return result, errors.New("未知或不支持的 Peer 类型")
 			}
+			result.Time = time.Now()
 			infos.Mutex.Lock()
-			infos.ChannelID[channel] = result
+			evictOldestChannelCache(infos.ChannelID, infos.MaxMs)
+			infos.ChannelID[channel] = &result
 			infos.Mutex.Unlock()
+		}
+	} else {
+		infos.Mutex.Lock()
+		cache.Time = time.Now()
+		infos.Mutex.Unlock()
+		result = *cache
+		if infos.Conf.DeBUG {
+			log.Printf("命中频道缓存: %s", channel)
 		}
 	}
 	return result, nil
 }
 
 // handleComments 处理评论消息，返回评论消息列表
-func (infos *Infos) handleComments(mid int32, ms *[]telegram.NewMessage, reverse bool) error {
+func (infos *Infos) handleComments(mid, offset int32, ms *[]telegram.NewMessage, reverse bool) error {
 	if len(*ms) == 0 {
 		return errors.New("未找到消息")
 	}
 	src := (*ms)[0]
 	if src.Message.Replies != nil && src.Message.Replies.ChannelID != 0 {
 		discussionID := src.Message.Replies.ChannelID
-		channelInfo, err := infos.handleChannel(src.Channel.Username)
+		username := src.Channel.Username
+		if username == "" {
+			username = strconv.FormatInt(src.Chat.ID, 10)
+		}
+		channelInfo, err := infos.handleChannel(username)
 		if err != nil {
 			log.Printf("获取频道失败: %+v", err)
 			return err
 		}
+		if channelInfo.Hash == 0 && src.Channel.AccessHash != 0 {
+			channelInfo.Hash = src.Channel.AccessHash
+			channelInfo.Peer = &telegram.InputPeerChannel{
+				ChannelID:  src.Channel.ID,
+				AccessHash: channelInfo.Hash,
+			}
+		}
 		results, err := infos.UserClient.MessagesGetReplies(&telegram.MessagesGetRepliesParams{
-			Peer:  channelInfo.Peer,
-			Limit: 100,
-			MsgID: mid,
+			Peer:     channelInfo.Peer,
+			Limit:    100,
+			OffsetID: offset,
+			MsgID:    mid,
 		})
 
 		if err != nil {

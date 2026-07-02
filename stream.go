@@ -535,7 +535,7 @@ func (stream *Stream) handleCache(task *Task, cacheKey string, offset, contentEn
 				}
 			}
 		} else {
-			evictOldestCache(infos.HeadCache, infos.MaxMedia)
+			evictOldestMediaCache(infos.HeadCache, infos.MaxMedia)
 			contents := make([]MediaContent, 0, int(stream.HeadSize/stream.ChunkSize))
 			infos.HeadCache[cacheKey] = &MediaCache{Contents: contents, Time: time.Now()}
 			if infos.Conf.DeBUG {
@@ -555,7 +555,7 @@ func (stream *Stream) handleCache(task *Task, cacheKey string, offset, contentEn
 				}
 			}
 		} else {
-			evictOldestCache(infos.TailCache, infos.MaxMedia)
+			evictOldestMediaCache(infos.TailCache, infos.MaxMedia)
 			contents := make([]MediaContent, 0, int(stream.TailSize/stream.ChunkSize))
 			infos.TailCache[cacheKey] = &MediaCache{Contents: contents, Time: time.Now()}
 			if infos.Conf.DeBUG {

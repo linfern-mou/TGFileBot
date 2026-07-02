@@ -737,7 +737,7 @@ func handleMess(m *telegram.NewMessage) error {
 	}
 
 	// 匹配格式如：t.me/c/12345/678 或 t.me/username/678
-	re := regexp.MustCompile(`t\.me\/(c\/(\d+)|([a-zA-Z0-9_]+))\/(\d+)(?:.*comment=(\d+))?`)
+	re := regexp.MustCompile(`t\.me\/(c\/(\d+)|([a-zA-Z0-9_]+))\/(\d+)(?:.*(?:comment|thread)=(\d+))?`)
 	matches := re.FindAllStringSubmatch(src, -1)
 
 	if len(matches) == 0 {
@@ -756,7 +756,6 @@ func handleMess(m *telegram.NewMessage) error {
 	}
 	return nil
 }
-
 
 // sendLink 发送美化后的下载链接消息
 func sendLink(m *telegram.NewMessage, links []string) error {

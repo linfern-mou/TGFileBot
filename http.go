@@ -58,6 +58,9 @@ func handleMain(w http.ResponseWriter, r *http.Request) {
 	case path == "/sources":
 		handleSources(w, r)
 		return
+	case path == "/comments":
+		handleComments(w, r)
+		return
 	case strings.HasPrefix(path, "/stream"):
 		// 处理文件分片流式下载（串流播放）核心接口
 		handleStream(w, r)
@@ -265,7 +268,6 @@ func handlePic(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	
 	if !src.IsMedia() {
 		http.Error(w, "消息不包含媒体", http.StatusBadRequest)
 		return
@@ -371,11 +373,12 @@ func handleLink(w http.ResponseWriter, r *http.Request) {
 	log.Printf("正在处理来自 %s 的请求, 开始提取直链, link=%s", clientIP, src)
 
 	// 3. 正则匹配并解析链接
-	re := regexp.MustCompile(`t\.me\/(c\/(\d+)|([a-zA-Z0-9_]+))\/(\d+)(?:.*comment=(\d+))?`)
+	re := regexp.MustCompile(`t\.me\/(c\/(\d+)|([a-zA-Z0-9_]+))\/(\d+)(?:.*(?:comment|thread)=(\d+))?`)
 	res.Matches = re.FindAllStringSubmatch(src, -1)
 	res.UID = params.UID
 	res.Pass = params.Pass
 	res.Hash = params.Hash
+	res.Offset = params.Offset
 
 	links := hackLinks(res)
 	if len(links) == 0 {
@@ -724,7 +727,7 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 			if num < maxLen {
 				keywords = words[num]
 			}
-			
+
 			keywords = strings.TrimSpace(keywords)
 			if keywords == "" || keywords == "#" {
 				return
@@ -785,6 +788,77 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleComments 处理评论消息，返回评论消息列表
+func handleComments(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, fmt.Sprintf("不支持的请求方法: %s", r.Method), http.StatusMethodNotAllowed)
+		return
+	}
+	params, err := handleParams(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	if params.MID == 0 {
+		http.Error(w, "消息ID无效", http.StatusBadRequest)
+		return
+	}
+
+	if len(params.Channels) != 0 {
+		result, err := infos.handleChannel(params.Channels[0])
+		if err != nil {
+			log.Printf("获取 %s 的消息失败: %+v", params.Channels[0], err)
+		}
+		params.CID = result.CID
+	}
+
+	if params.CID == 0 {
+		http.Error(w, "频道ID无效", http.StatusBadRequest)
+		return
+	}
+
+	param := &telegram.SearchOption{IDs: []int32{params.MID}}
+	_, ms, err := infos.handleMs(params.CID, params.MID, "user", param)
+	if err != nil || len(ms) == 0 {
+		if len(ms) == 0 {
+			err = errors.New("未获取到消息")
+		}
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	if err := infos.handleComments(params.MID, params.Offset, &ms, true); err != nil {
+		http.Error(w, "获取评论失败", http.StatusInternalServerError)
+		return
+	}
+	items := Items{
+		HasMore: false,
+		Item:    make([]Item, 0, len(ms)),
+	}
+
+	for _, m := range ms {
+		if items.Channel == "" {
+			items.Channel = m.Channel.Title
+			items.ID = m.Channel.Username
+		}
+		if IsVideoFile(m.File.Ext) && m.File.Size < params.Filter {
+			continue
+		}
+		items.Item = append(items.Item, handleItem(m))
+	}
+	content, err := json.Marshal(items)
+	if err != nil {
+		log.Printf("JSON序列化失败: %+v", err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	n, err := w.Write(content)
+	if err != nil {
+		log.Printf("写入长度 %d 的响应体失败: %+v", n, err)
+		return
+	}
+
+}
+
 // handleMediaCate 根据文件扩展名返回对应的 MIME 类型
 func handleMediaCate(fileName string) string {
 	lowerFileName := strings.ToLower(fileName)
@@ -818,7 +892,7 @@ func handleMediaCate(fileName string) string {
 func hackLinks(res HackLink) (links []string) {
 	var errs error
 	for _, match := range res.Matches {
-		var cid int64   // 用于 ResolvePeer 的标识项（可以是用户名或 chatID）
+		var cid int64 // 用于 ResolvePeer 的标识项（可以是用户名或 chatID）
 		var mid int32 // 消息 ID
 
 		// 1. 解析 Chat ID 或 Username
@@ -869,7 +943,7 @@ func hackLinks(res HackLink) (links []string) {
 
 		// 4. 处理链接中的评论 (comment) 逻辑
 		if match[5] != "" {
-			if err := infos.handleComments(mid, &ms, true); err != nil {
+			if err := infos.handleComments(mid, res.Offset, &ms, true); err != nil {
 				log.Printf("获取评论失败: cid=%v, mid=%d, err=%+v", cid, mid, err)
 				errs = errors.Join(errs, err)
 				continue

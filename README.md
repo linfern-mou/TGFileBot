@@ -361,6 +361,49 @@ docker run -d --name tgfilebot -p 8080:8080 -v $(pwd)/files:/root/files tgfilebo
 
 ---
 
+### `GET /comments` — 获取消息评论中的所有媒体文件
+
+**URL 格式**:
+```
+/comments?cid={频道ID}&mid={消息ID}&offset={偏移ID}&filter={过滤大小}&key={key}
+```
+
+| 参数 | 必填 | 说明 |
+|:---|:---:|:---|
+| `cid` | 是 | 频道ID，与cname二选一 |
+| `cname` | 是 | 频道username，与cid二选一 |
+| `mid` | 是 | 消息ID |
+| `offset` | 是 | 评论的偏移ID |
+| `filter` | 否 | 过滤文件大小，如 `10M`，仅返回大于此大小的文件，默认 `128K` |
+| `key` / `hash` / `uid` | 否* | 鉴权参数（同上）|
+
+**响应示例**:
+```json
+{
+  "more": false,
+  "items": [
+    {
+      "more": false,
+      "id": "luolimeimei",
+      "channel": "🍔电视剧/综艺/电影/动漫/美剧",
+      "item": [
+        { 
+          "ext": ".mp4",
+          "src": "文字消息",
+          "name": "example.mp4", 
+          "mid": 100, 
+          "cid": -1001234567890, 
+          "gid": 14248657761577388,
+          "size": 104857600,
+        }
+      ]
+    }
+  ]
+}
+```
+
+---
+
 ### 💡 身份鉴权说明
 
 若配置了 `password`，访问所有 HTTP 接口时须在 URL 中携带以下任意一种鉴权方式：
