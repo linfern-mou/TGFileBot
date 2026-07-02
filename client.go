@@ -740,7 +740,7 @@ func (infos *Infos) list(channel string, page, limit int, filter int64, reverse 
 			items.Item = append(items.Item, item)
 		}
 	}
-
+	
 	items.ID = channel
 	return items, nil
 }
@@ -801,6 +801,7 @@ func (infos *Infos) search(channel, keywords string, page, limit int, offset int
 		items.Item = append(items.Item, handleItem(m))
 	}
 	items.ID = channel
+	items.Word = keywords
 	return items, nil
 }
 

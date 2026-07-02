@@ -77,7 +77,6 @@ type MediaCache struct {
 	Time     time.Time
 }
 
-
 type Item struct {
 	Ext  string `json:"ext"`
 	Src  string `json:"src"`
@@ -92,6 +91,7 @@ type Item struct {
 type Items struct {
 	HasMore bool   `json:"more"`
 	ID      string `json:"id"`
+	Word    string `json:"word"`
 	Channel string `json:"channel"`
 	Item    []Item `json:"item"`
 }

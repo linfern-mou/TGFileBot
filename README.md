@@ -197,7 +197,7 @@ docker run -d --name tgfilebot -p 8080:8080 -v $(pwd)/files:/root/files tgfilebo
 
 ### `GET /link` — 链接解析跳转接口
 
-将 Telegram 消息链接解析为直链，并以 **302 重定向** 返回。
+将 Telegram 消息链接解析为直链，并以 **[]string格式** 返回。
 
 **URL 格式**:
 ```
@@ -214,6 +214,14 @@ docker run -d --name tgfilebot -p 8080:8080 -v $(pwd)/files:/root/files tgfilebo
 **支持的链接格式**:
 - 私有频道: `https://t.me/c/1234567890/100`
 - 公开频道: `https://t.me/channelname/100`
+
+**响应示例**:
+```json
+[
+  "直链1",
+  "直链2",
+]
+```
 
 ---
 
@@ -243,6 +251,7 @@ docker run -d --name tgfilebot -p 8080:8080 -v $(pwd)/files:/root/files tgfilebo
     {
       "more": false,
       "id": "luolimeimei",
+      "word": "搜索关键字",
       "channel": "🍔电视剧/综艺/电影/动漫/美剧",
       "item": [
         { 
