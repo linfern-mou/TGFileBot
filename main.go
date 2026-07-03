@@ -24,7 +24,6 @@ import (
 type Params struct {
 	CID      int64
 	UID      int64
-	Filter   int64
 	Offset   int32
 	MID      int32
 	Page     int
@@ -35,6 +34,7 @@ type Params struct {
 	Hash     string
 	Link     string
 	Keywords string
+	Filters  []int64
 	Channels []string
 }
 

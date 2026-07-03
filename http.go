@@ -95,6 +95,17 @@ func handleParams(r *http.Request) (result Params, err error) {
 		result.Channels = append(result.Channels, "@"+strings.TrimLeft(value, "@"))
 	}
 
+	values = strings.Split(params.Get("filter"), ",")
+	result.Filters = make([]int64, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		size := convertSize(value)
+		result.Filters = append(result.Filters, size)
+	}
+
 	page, err := strconv.Atoi(params.Get("page"))
 	if err != nil || page < 0 {
 		page = 1
@@ -150,7 +161,7 @@ func handleParams(r *http.Request) (result Params, err error) {
 	}
 	result.Reverse = reverse
 
-	result.Filter = convertSize(params.Get("filter"))
+	
 	return result, nil
 }
 
@@ -333,9 +344,13 @@ func handleList(w http.ResponseWriter, r *http.Request) {
 		Items   []Items `json:"items"`
 	}
 	items.Items = make([]Items, 0, len(params.Channels))
-
-	for _, channel := range params.Channels {
-		item, err := infos.list(channel, params.Page, params.Limit, params.Offset, params.Filter, params.Reverse, r.Context())
+	lenFilters := len(params.Filters)
+	for num, channel := range params.Channels {
+		filter := int64(0)
+		if num < lenFilters {
+			filter = params.Filters[num]
+		}
+		item, err := infos.list(channel, params.Page, params.Limit, params.Offset, filter, params.Reverse, r.Context())
 		if err != nil {
 			log.Printf("获取频道 %s 的文件列表失败: %+v", channel, err)
 			continue
@@ -653,8 +668,12 @@ func handleSources(w http.ResponseWriter, r *http.Request) {
 		HasMore: false,
 		Item:    make([]Item, 0, len(ms)),
 	}
+	filter := int64(0)
+	if len(params.Filters) > 0 {
+		filter = params.Filters[0]
+	}
 	for _, m := range ms {
-		if IsVideoFile(m.File.Ext) && m.File.Size < params.Filter {
+		if IsVideoFile(m.File.Ext) && m.File.Size < filter {
 			continue
 		}
 		item := handleItem(m)
@@ -721,7 +740,8 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 		maxCount = 3
 	}
 
-	maxLen := len(words)
+	lenWords := len(words)
+	lenFilters := len(params.Filters)
 	for num, channel := range channels {
 		infos.Cond.L.Lock()
 		for searchCount.Load() >= maxCount {
@@ -741,9 +761,13 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 				infos.Cond.Broadcast()
 				infos.Cond.L.Unlock()
 			}()
-
+			
+			filter := int64(0)
+			if num < lenFilters {
+				filter = params.Filters[num]
+			}
 			keywords := words[0]
-			if num < maxLen {
+			if num < lenWords {
 				keywords = words[num]
 			}
 
@@ -751,7 +775,7 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 			if keywords == "" || keywords == "#" {
 				return
 			}
-			result, err := infos.search(channel, keywords, page, limit, int32(offset), params.Filter, params.Reverse, r.Context())
+			result, err := infos.search(channel, keywords, page, limit, int32(offset), filter, params.Reverse, r.Context())
 			if err != nil {
 				return
 			}
@@ -870,8 +894,12 @@ func handleComments(w http.ResponseWriter, r *http.Request) {
 		HasMore: params.Limit != len(ms),
 	}
 	result.HasMore = items.HasMore
+	filter := int64(0)
+	if len(params.Filters) > 0 {
+		filter = params.Filters[0]
+	}
 	for _, m := range ms {
-		if IsVideoFile(m.File.Ext) && m.File.Size < params.Filter {
+		if IsVideoFile(m.File.Ext) && m.File.Size < filter {
 			continue
 		}
 

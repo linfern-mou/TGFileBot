@@ -866,7 +866,7 @@ func (infos *Infos) handleMs(params HandleMs) (result string, ms []telegram.NewM
 	infos.Mutex.RLock()
 	value, ok := infos.MsCache[kname]
 	infos.Mutex.RUnlock()
-		
+
 	if ok && value.Mes != nil && len(value.Mes) >= params.Limit {
 		if infos.Conf.DeBUG {
 			log.Printf("命中消息缓存: %s", kname)
@@ -876,6 +876,7 @@ func (infos *Infos) handleMs(params HandleMs) (result string, ms []telegram.NewM
 	} else {
 		param := &telegram.SearchOption{
 			IDs:     params.MIDs,
+			Query:   params.Words,
 			Limit:   int32(params.Limit),
 			Offset:  params.OffsetID,
 			Context: params.Ctx,
