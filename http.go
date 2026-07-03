@@ -480,6 +480,7 @@ func handleStream(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// 创建新的 Stream 流管理对象
 		stream := newStream(r.Context(), infos.Client, src.Media(), infos.Conf.Workers, params.MID, params.CID, src.File.Size, fileName)
+		stream.Ms = ms
 
 		// 如果是转发的消息, 重定向源频道以确保分片下载稳定性
 		if src.Message.FwdFrom != nil {
@@ -532,12 +533,14 @@ func handleStream(w http.ResponseWriter, r *http.Request) {
 		// 启动并发下载协程
 		go stream.start(start, end)
 		defer func() {
-			kname := cate + ":" + strconv.FormatInt(params.CID, 10) + ":" + strconv.FormatInt(int64(params.MID), 10)
-			infos.Mutex.Lock()
-			evictOldestMsCache(infos.MsCache, infos.MaxMs)
-			infos.MsCache[kname] = &MsCache{Mes: stream.Ms, Time: time.Now()}
-			infos.Mutex.Unlock()
-			
+			if stream.Version.Load() > 0 {
+				kname := cate + ":" + strconv.FormatInt(params.CID, 10) + ":" + strconv.FormatInt(int64(params.MID), 10)
+				infos.Mutex.Lock()
+				evictOldestMsCache(infos.MsCache, infos.MaxMs)
+				infos.MsCache[kname] = &MsCache{Mes: stream.Ms, Time: time.Now()}
+				infos.Mutex.Unlock()
+			}
+
 			// 异步清理：不阻塞当前请求 goroutine 返回，使新请求能立即被处理
 			go stream.clean()
 			switch cate {
