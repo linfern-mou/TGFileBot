@@ -671,10 +671,6 @@ func (infos *Infos) list(channel string, page, limit int, filter int64, reverse 
 		items.HasMore = true
 	}
 
-	if reverse {
-		slices.Reverse(ms)
-	}
-
 	infos.Mutex.RLock()
 	latestCount := infos.LatestCount
 	latestID := infos.LatestID
@@ -741,6 +737,10 @@ func (infos *Infos) list(channel string, page, limit int, filter int64, reverse 
 		}
 	}
 
+	if reverse {
+		slices.Reverse(items.Item)
+	}
+
 	items.ID = channel
 	return items, nil
 }
@@ -783,10 +783,6 @@ func (infos *Infos) search(channel, keywords string, page, limit int, offset int
 		items.HasMore = true
 	}
 
-	if reverse {
-		slices.Reverse(ms)
-	}
-
 	for _, m := range ms {
 		if m.File == nil {
 			continue
@@ -803,6 +799,9 @@ func (infos *Infos) search(channel, keywords string, page, limit int, offset int
 	}
 	items.ID = channel
 	items.Word = keywords
+	if reverse {
+		slices.Reverse(items.Item)
+	}
 	return items, nil
 }
 
@@ -841,13 +840,20 @@ func (infos *Infos) handleMs(cid int64, mid int32, cate, words string, params *t
 	}
 
 	// 3. 获取消息
-	key := fmt.Sprintf("%d:%d:%s:%s", cid, mid, cate, words)
+	kname := cate + ":" + strconv.FormatInt(cid, 10)
+	if mid != 0 {
+		kname += ":" + strconv.FormatInt(int64(mid), 10)
+	}
+	if words != "" {
+		kname += ":" + words
+	}
+
 	infos.Mutex.RLock()
-	value, ok := infos.MsCache[key]
+	value, ok := infos.MsCache[kname]
 	infos.Mutex.RUnlock()
 	if ok {
 		if infos.Conf.DeBUG {
-			log.Printf("命中消息缓存: %s", key)
+			log.Printf("命中消息缓存: %s", kname)
 		}
 		ms = value.Mes
 		value.Time = time.Now()
@@ -871,7 +877,7 @@ func (infos *Infos) handleMs(cid int64, mid int32, cate, words string, params *t
 		if hasMedia {
 			infos.Mutex.Lock()
 			evictOldestMsCache(infos.MsCache, infos.MaxMs)
-			infos.MsCache[key] = &MsCache{Mes: ms, Time: time.Now()}
+			infos.MsCache[kname] = &MsCache{Mes: ms, Time: time.Now()}
 			infos.Mutex.Unlock()
 		}
 	}
