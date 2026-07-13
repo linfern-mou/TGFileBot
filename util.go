@@ -93,11 +93,11 @@ func convertSize(str string) int64 {
 		return int64(128 * 1024)
 	}
 
-	value, err := strconv.ParseInt(src, 10, 64)
+	value, err := strconv.ParseFloat(src, 64)
 	if err != nil {
 		return int64(128 * 1024)
 	}
-	return value * unit
+	return int64(value * float64(unit))
 }
 
 // extractContent 从字符串中提取正文与可选的行数参数

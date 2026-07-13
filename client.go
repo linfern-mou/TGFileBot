@@ -539,7 +539,7 @@ func (infos *Infos) wakeTCP(cate string) error {
 	}
 
 	// 设置较短超时
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	// 最轻量探活 RPC
@@ -558,7 +558,7 @@ func (infos *Infos) wakeTCP(cate string) error {
 			return err
 		}
 		// 重连后再次验证，必须使用全新的 context，防止使用已过期的旧 context
-		newCtx, newCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		newCtx, newCancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer newCancel()
 		if value, err := infos.Client.Ping(newCtx); err != nil {
 			log.Printf("重连 TCP 后验证失败: %+v", err)
