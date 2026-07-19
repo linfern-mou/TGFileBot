@@ -867,12 +867,7 @@ func (infos *Infos) handleMs(params HandleMs) (result *MsCache, err error) {
 		if err != nil {
 			return result, err
 		}
-		// cid 已明确指定时不能用 cname 查到的频道自己的 CID 覆盖：
-		// 评论区/讨论组回复消息的 cid 本来就和其所属频道的 cname 不是同一个频道
-		// (cid 是讨论组，cname 是主频道)，覆盖会导致按错误的频道去查消息，播放失败
-		if params.CID == 0 {
-			params.CID = channel.CID
-		}
+		params.CID = channel.CID
 		src = "name=" + channel.UserName
 		kname += ":" + channel.UserName
 	}

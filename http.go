@@ -1033,6 +1033,12 @@ func handleComments(w http.ResponseWriter, r *http.Request) {
 		filter = params.Filters[0]
 	}
 	for _, m := range ms {
+		// ms[0] 是 handleMs 直接取来的锚点消息，不像评论区回复那样经过 IsMedia 过滤，
+		// 锚点帖子本身可能是纯文本/无媒体消息或频道解析失败，m.File/m.Channel 此时为 nil，
+		// 必须先判空再访问 —— handleItem 内部会直接读 m.Channel.ID，同样需要先排除掉
+		if m.File == nil || m.Channel == nil {
+			continue
+		}
 		if IsVideoFile(m.File.Ext) && m.File.Size < filter {
 			continue
 		}
