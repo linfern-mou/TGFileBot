@@ -532,9 +532,9 @@ func (infos *Infos) submitPass(pass string) (err error) {
 	}
 }
 
-// clientByCate 根据消息缓存记录的 cate ("user"/"bot") 解析出对应的客户端实例。
+// cateClient 根据消息缓存记录的 cate ("user"/"bot") 解析出对应的客户端实例。
 // 供 HTTP 处理器在拿到 handleMs 的结果后使用，取代此前直接读取共享字段 infos.Client 的做法。
-func (infos *Infos) clientByCate(cate string) *telegram.Client {
+func (infos *Infos) cateClient(cate string) *telegram.Client {
 	if cate == "user" {
 		return infos.UserClient.Load()
 	}
@@ -672,7 +672,7 @@ func (infos *Infos) list(channel string, page, limit int, offset int32, filter i
 		return items, err
 	}
 
-	ms := msCache.snapshot()
+	ms := msCache.load()
 	lenMs := len(ms)
 	switch {
 	case lenMs == 0:
@@ -790,7 +790,7 @@ func (infos *Infos) search(channel, keywords string, page, limit int, offset int
 		return items, err
 	}
 
-	ms := msCache.snapshot()
+	ms := msCache.load()
 	lenMs := len(ms)
 	switch {
 	case lenMs == 0:
@@ -835,18 +835,22 @@ func (infos *Infos) handleMs(params HandleMs) (result *MsCache, err error) {
 		params.Cate = "bot"
 		client = infos.BotClient.Load()
 	}
+
 	stat := infos.tcpStat(params.Cate)
 	latenc := stat.Latenc.Load()
+	duration := stat.since()
 
 	// 2. 统一处理 TCP 链路检查与唤醒逻辑（彻底去除了重复代码）
-	if elapsed := stat.since(); elapsed.Minutes() > 30 {
+	// 当连续失败计数 > 0 时, 无视 30 分钟阈值强制触发探活重连
+	switch {
+	case duration.Minutes() > 30 || stat.Fails.Load() > 0:
 		if err = infos.wakeTCP(client, params.Cate); err != nil {
 			log.Printf("唤醒 TCP 连接失败: %+v", err)
 			return result, err
 		}
-	} else if debug {
-		minutes := int(elapsed.Minutes())
-		seconds := int(elapsed.Seconds()) % 60
+	case debug:
+		minutes := int(duration.Minutes())
+		seconds := int(duration.Seconds()) % 60
 		if minutes != 0 {
 			timeStr := fmt.Sprintf("%02d分%02d秒", minutes, seconds)
 			timeStr = strings.TrimPrefix(timeStr, "0")
@@ -913,7 +917,7 @@ func (infos *Infos) handleMs(params HandleMs) (result *MsCache, err error) {
 	infos.Mutex.RUnlock()
 
 	// hit 的判断与 result.Time 的更新必须在同一把锁内完成：result.Mes/Time 可能被
-	// refreshMs 或流式下载完成后的缓存回写并发修改（详见 MsCache.snapshot 的注释）
+	// refreshMs 或流式下载完成后的缓存回写并发修改（详见 MsCache.load 的注释）
 	hit := false
 	if ok {
 		infos.Mutex.Lock()
@@ -939,6 +943,8 @@ func (infos *Infos) handleMs(params HandleMs) (result *MsCache, err error) {
 		}
 		ms, err := client.GetMessages(params.CID, param)
 		if err != nil {
+			// RPC 调用失败可能是 TCP 断连引起, 标记失败以便下次请求强制触发 wakeTCP
+			stat.fail()
 			return result, err
 		}
 

@@ -115,11 +115,11 @@ type MsCache struct {
 	Version atomic.Int64
 }
 
-// snapshot 在持有 infos.Mutex 读锁的情况下安全地取出当前消息列表。
+// load 在持有 infos.Mutex 读锁的情况下安全地取出当前消息列表。
 // msCache 一旦被写入 infos.MsCache 就可能被并发的多个请求共享；refreshMs
 // 以及流式下载完成后的缓存回写都会在持锁状态下重新赋值 Mes 字段，
 // 因此所有读取都必须走这里，而不是直接 msCache.Mes（否则可能读到撕裂的 slice header）。
-func (msCache *MsCache) snapshot() []telegram.NewMessage {
+func (msCache *MsCache) load() []telegram.NewMessage {
 	infos.Mutex.RLock()
 	defer infos.Mutex.RUnlock()
 	return msCache.Mes
@@ -154,12 +154,14 @@ type ID struct {
 type TCPStatu struct {
 	Latenc   atomic.Int64 // 延迟, 单位毫秒
 	WakeTime atomic.Int64 // 最近一次探活/唤醒时间, UnixNano; 零值表示"从未探活", 会强制触发下一次 wakeTCP
+	Fails    atomic.Int64 // 连续下载失败计数; > 0 时 handleMs 跳过 30 分钟阈值, 强制触发 wakeTCP
 }
 
-// wake 记录一次成功的探活/唤醒, 更新延迟和唤醒时间
+// wake 记录一次成功的探活/唤醒, 更新延迟和唤醒时间, 同时清零连续失败计数
 func (s *TCPStatu) wake(latenc int64) {
 	s.Latenc.Store(latenc)
 	s.WakeTime.Store(time.Now().UnixNano())
+	s.Fails.Store(0)
 }
 
 // reset 清空唤醒时间, 强制下一次请求重新触发 wakeTCP
@@ -167,9 +169,16 @@ func (s *TCPStatu) reset() {
 	s.WakeTime.Store(0)
 }
 
-// touch 仅刷新唤醒时间, 不改变已记录的延迟
+// touch 仅刷新唤醒时间, 不改变已记录的延迟; 同时清零连续失败计数
 func (s *TCPStatu) touch() {
 	s.WakeTime.Store(time.Now().UnixNano())
+	s.Fails.Store(0)
+}
+
+// fail 递增连续失败计数并清空唤醒时间, 使下一个请求强制走 wakeTCP 重连探活
+func (s *TCPStatu) fail() {
+	s.Fails.Add(1)
+	s.WakeTime.Store(0)
 }
 
 // since 返回距离上次探活/唤醒过去的时长

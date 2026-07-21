@@ -243,9 +243,9 @@ func handlePic(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	ms := msCache.snapshot()
+	ms := msCache.load()
 	cate := msCache.Cate
-	client := infos.clientByCate(cate)
+	client := infos.cateClient(cate)
 
 	if len(ms) == 0 {
 		http.Error(w, "未获取到消息", http.StatusBadRequest)
@@ -257,7 +257,7 @@ func handlePic(w http.ResponseWriter, r *http.Request) {
 	}
 
 	src := ms[0]
-	defer infos.tcpStat(cate).touch()
+	stat := infos.tcpStat(cate)
 
 	// 从媒体中查找最大的 PhotoSize
 	var actualThumb telegram.PhotoSize
@@ -334,6 +334,7 @@ func handlePic(w http.ResponseWriter, r *http.Request) {
 				}
 				buf.Reset()
 			} else {
+				stat.fail()
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -347,6 +348,7 @@ func handlePic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	stat.touch()
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
 	if n, err := w.Write(buf.Bytes()); err != nil {
@@ -490,9 +492,9 @@ func handleStream(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	ms := msCache.snapshot()
+	ms := msCache.load()
 	cate := msCache.Cate
-	client := infos.clientByCate(cate)
+	client := infos.cateClient(cate)
 
 	if len(ms) == 0 {
 		http.Error(w, "未获取到消息", http.StatusBadRequest)
@@ -565,6 +567,7 @@ func handleStream(w http.ResponseWriter, r *http.Request) {
 					}
 					buf.Reset()
 				} else {
+					infos.tcpStat(cate).fail()
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
 				}
@@ -578,6 +581,7 @@ func handleStream(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		infos.tcpStat(cate).touch()
 		content := buf.Bytes()
 		if ranHeader == "" {
 			w.Header().Set("Content-Length", strconv.Itoa(len(content)))
@@ -788,7 +792,7 @@ func handleSources(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	resources := msCache.snapshot()
+	resources := msCache.load()
 	if len(resources) == 0 {
 		http.Error(w, "未获取到消息", http.StatusBadRequest)
 		return
@@ -1008,7 +1012,7 @@ func handleComments(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	ms := msCache.snapshot()
+	ms := msCache.load()
 	if len(ms) == 0 {
 		http.Error(w, "未获取到消息", http.StatusNotFound)
 		return
@@ -1154,7 +1158,7 @@ func hackLinks(res HackLink) (items []Item, errs error) {
 			errs = errors.Join(errs, err)
 			continue
 		}
-		ms := msCache.snapshot()
+		ms := msCache.load()
 
 		if len(ms) == 0 {
 			log.Printf("未获取到消息: cid=%v, mid=%d", cid, mid)
