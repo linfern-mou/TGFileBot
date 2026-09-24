@@ -394,7 +394,7 @@ func (infos *Infos) startUserBotQR() (err error) {
 				}
 			}
 			sendMS(nil, src, &telegram.SendOptions{Caption: noteQR()}, mesQRTTL())
-			if infos.handleQRWaitLoginResult(qr.WaitLogin(), func(err error) {
+			if infos.handleQRWaitResult(qr.WaitLogin(), func(err error) {
 				sendMS(nil, fmt.Sprintf("QR 登录失败: %+v", err), nil, 60)
 			}) {
 				return
@@ -474,7 +474,7 @@ func (infos *Infos) finishQR(err error) bool {
 	return true
 }
 
-func (infos *Infos) handleQRWaitLoginResult(err error, report func(error)) bool {
+func (infos *Infos) handleQRWaitResult(err error, report func(error)) bool {
 	if err == nil || strings.Contains(err.Error(), "scanning again") {
 		return false
 	}
@@ -814,7 +814,7 @@ func (infos *Infos) list(channel string, page, limit int, offset int32, filter i
 	// 按频道读取上一页遗留的相册边界去重信息, latestMIDs 精确匹配消息 ID,
 	// 不再用字符串子串匹配（会把 ID=12 误判为 ID=123 的子串导致误删), 且按频道隔离, 避免不同频道间 mid 相同时互相污染
 	infos.Mutex.RLock()
-	latestGroup := infos.LatestGroups[channel]
+	latestGroup := infos.LatestMIDss[channel]
 	infos.Mutex.RUnlock()
 	latestCount := 0
 	var latestMIDs map[int32]bool
@@ -875,8 +875,8 @@ func (infos *Infos) list(channel string, page, limit int, offset int32, filter i
 			}
 			if num == maxNum {
 				infos.Mutex.Lock()
-				if evictOldestLatestGID(infos.LatestGroups, infos.MaxChannel) {
-					infos.LatestGroups[channel] = &LatestGroup{Count: count, MIDs: newMIDs, Time: time.Now()}
+				if evictOldestLatestGID(infos.LatestMIDss, infos.MaxChannel) {
+					infos.LatestMIDss[channel] = &LatestMIDs{Count: count, MIDs: newMIDs, Time: time.Now()}
 				}
 				infos.Mutex.Unlock()
 			}

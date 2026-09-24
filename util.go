@@ -323,8 +323,8 @@ func evictOldestChannelCache(cache map[string]*ChannelInfo, maxCount int) bool {
 	return evictOldest(cache, maxCount, func(v *ChannelInfo) time.Time { return v.Time }, "频道缓存")
 }
 
-func evictOldestLatestGID(cache map[string]*LatestGroup, maxCount int) bool {
-	return evictOldest(cache, maxCount, func(v *LatestGroup) time.Time { return v.Time }, "相册去重缓存")
+func evictOldestLatestGID(cache map[string]*LatestMIDs, maxCount int) bool {
+	return evictOldest(cache, maxCount, func(v *LatestMIDs) time.Time { return v.Time }, "相册去重缓存")
 }
 
 // mediaCacheName 生成缓存 key
