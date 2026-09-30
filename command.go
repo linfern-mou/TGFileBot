@@ -6,6 +6,7 @@ import (
 	"html"
 	"log"
 	"regexp"
+	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
@@ -16,6 +17,15 @@ import (
 
 // handleBotCommand 是 Bot 的总消息分发入口，处理所有管理指令
 func handleBotCommand(m *telegram.NewMessage) error {
+	// 该函数由 gogram 在收到消息时异步回调。goroutine panic 不受 http handler
+	// 的内置 recover 保护，若此处未恢复会直接终止整个进程（整个机器人退出）。
+	// 在入口恢复并记录栈，使单条消息/单条命令处理异常不拖垮服务。
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("handleBotCommand panic 已恢复: %v\n%s", r, debug.Stack())
+		}
+	}()
+
 	// 频道广播消息（bot 为频道成员时收到）的 Sender 可能为 nil, 直接解引用会 panic
 	if m.Sender != nil && m.Sender.ID == infos.BotID {
 		return nil

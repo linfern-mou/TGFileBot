@@ -16,10 +16,6 @@ import (
 )
 
 var (
-	imExt = map[string]bool{
-		".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".bmp": true,
-		".webp": true, ".heic": true, ".heif": true,
-	}
 	videoExt = map[string]bool{
 		".mp4": true, ".mkv": true, ".avi": true, ".wmv": true, ".flv": true,
 		".f4v": true, ".webm": true, ".m4v": true, ".mov": true, ".3gp": true,
@@ -35,11 +31,6 @@ var (
 // isVideoFile 判断文件后缀是否为视频文件
 func isVideoFile(ext string) bool {
 	return videoExt[strings.ToLower(ext)]
-}
-
-// isPicFile 判断文件后缀是否为图片文件
-func isPicFile(ext string) bool {
-	return imExt[strings.ToLower(ext)]
 }
 
 // handleTime 将秒数格式化为人类可读的时间字符串

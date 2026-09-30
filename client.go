@@ -288,7 +288,7 @@ func (infos *Infos) startUserBot(phone string) (err error) {
 				return
 			}
 
-			if status == true {
+			if status {
 				if infos.Conf.Load().DeBUG {
 					log.Printf("UserBot 登录成功")
 				}
@@ -628,6 +628,7 @@ func (infos *Infos) wakeTCPClient(client connectClient, cate string) error {
 	defer mu.Unlock()
 
 	debug := infos.Conf.Load().DeBUG
+	stat := infos.connectStat(cate)
 
 	// 设置较短超时
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -639,36 +640,47 @@ func (infos *Infos) wakeTCPClient(client connectClient, cate string) error {
 		if debug {
 			log.Printf("TCP 链路异常, 正在重连: %+v", err)
 		}
-		// 强制断开
-		if err := client.Disconnect(); err != nil {
-			log.Printf("强制断开 TCP 连接失败: %+v", err)
-		}
-		// 重连
-		if err := client.Connect(); err != nil {
-			log.Printf("重连 TCP 失败: %+v", err)
-			infos.connectStat(cate).markDead()
-			return err
-		}
-		// 重连后再次验证，必须使用全新的 context，防止使用已过期的旧 context
-		newCtx, newCancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer newCancel()
-		if value, err := client.Ping(newCtx); err != nil {
-			log.Printf("重连 TCP 后验证失败: %+v", err)
-			infos.connectStat(cate).markDead()
-			return err
-		} else {
+		// 重连带退避重试, 避免一次瞬时故障就把链路误判为永久死亡
+		const maxReconnect = 3
+		var lastErr error
+		for count := 1; count <= maxReconnect; count++ {
+			// 强制断开
+			if err := client.Disconnect(); err != nil {
+				log.Printf("强制断开 TCP 连接失败: %+v", err)
+			}
+			// 重连
+			if err := client.Connect(); err != nil {
+				lastErr = err
+				log.Printf("重连 TCP 失败(第 %d/%d 次): %+v", count, maxReconnect, err)
+				time.Sleep(time.Duration(count) * 500 * time.Millisecond)
+				continue
+			}
+			// 重连后再次验证，必须使用全新的 context，防止使用已过期的旧 context
+			newCtx, newCancel := context.WithTimeout(context.Background(), 15*time.Second)
+			value, verr := client.Ping(newCtx)
+			newCancel()
+			if verr != nil {
+				lastErr = verr
+				log.Printf("重连 TCP 后验证失败(第 %d/%d 次): %+v", count, maxReconnect, verr)
+				time.Sleep(time.Duration(count) * 500 * time.Millisecond)
+				continue
+			}
 			if debug {
 				log.Printf("TCP 链路已恢复, 延迟: %dms", value.Milliseconds())
 			}
-			infos.connectStat(cate).wake(value.Milliseconds())
+			stat.wake(value.Milliseconds())
 			return nil
 		}
+		// 多次重试均失败, 最终标记链路死亡
+		log.Printf("重连 TCP 连续 %d 次失败, 标记链路死亡: %+v", maxReconnect, lastErr)
+		stat.markDead()
+		return lastErr
 	}
 
 	if debug {
 		log.Printf("TCP 链路正常, 延迟: %dms", latenc.Milliseconds())
 	}
-	infos.connectStat(cate).wake(latenc.Milliseconds())
+	stat.wake(latenc.Milliseconds())
 	return nil
 }
 
@@ -970,6 +982,9 @@ func (infos *Infos) search(channel, keywords string, page, limit int, offset int
 const listFreshTTL = 30 * time.Second
 
 // handleMs 根据当前网络延迟选择最佳客户端
+// 返回约定: 成功时返回非 nil 的消息缓存; 失败时 err 非 nil,
+// 同时 result 仍是非 nil 的空 MsCache（load 得到空切片）。
+// 这样调用方即使漏检查 err, 也不会因 nil 指针 panic——见下预初始化。
 func (infos *Infos) handleMs(params HandleMs) (result *MsCache, err error) {
 	debug := infos.Conf.Load().DeBUG
 
@@ -983,6 +998,12 @@ func (infos *Infos) handleMs(params HandleMs) (result *MsCache, err error) {
 		params.Cate = "bot"
 		client = infos.BotClient.Load()
 	}
+
+	// 预初始化命名返回值 result 为非 nil 空对象: 使下方所有错误路径
+	// (wakeTCP 失败 / handleChannel 失败 / GetMessages 失败 / 空结果)
+	// 都返回合法的 *MsCache, 而非 nil 指针。MsCache 零值安全:
+	// load() 对空对象返回 nil 切片, 不会 panic。
+	result = &MsCache{Cate: params.Cate}
 
 	stat := infos.connectStat(params.Cate)
 	latenc := stat.Latenc.Load()
@@ -1035,7 +1056,11 @@ func (infos *Infos) handleMs(params HandleMs) (result *MsCache, err error) {
 	}
 
 	cidStr := strconv.FormatInt(params.CID, 10)
-	src = "cid=" + cidStr
+	if src == "" {
+		src = "cid=" + cidStr
+	} else {
+		src += ", cid=" + cidStr
+	}
 	kname += ":" + cidStr
 
 	if len(params.MIDs) > 0 {
