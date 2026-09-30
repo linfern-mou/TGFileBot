@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,6 +32,21 @@ var (
 // isVideoFile 判断文件后缀是否为视频文件
 func isVideoFile(ext string) bool {
 	return videoExt[strings.ToLower(ext)]
+}
+
+// safeGo 以受保护的方式启动一个后台协程:
+// 在该协程内发生 panic 时恢复并记录堆栈, 避免整个进程崩溃。
+// note: 仅保护本协程; 协程内部用 defer 注册的资源清理(锁/WaitGroup.Done/Cond.Broadcast 等)
+// 会在外层 recover 之前执行(Go defer 后注册先执行), 因此 panic 时资源仍能正常归还。
+func safeGo(fn func()) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("协程崩溃(Panic)已恢复: %v\n%s", r, debug.Stack())
+			}
+		}()
+		fn()
+	}()
 }
 
 // handleTime 将秒数格式化为人类可读的时间字符串

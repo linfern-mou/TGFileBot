@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -103,27 +102,22 @@ func (stream *Stream) start(contentStart, contentEnd int64) {
 	}
 
 	for numTask := 1; numTask <= maxTasks; numTask++ {
-		go func(numTask int) {
+		safeGo(func() {
 			stream.download(numTask, contentStart, contentEnd)
-		}(numTask)
+		})
 	}
 }
 
 // download 是工作协程的核心逻辑, 负责循环领取并下载文件分片
 func (stream *Stream) download(numTask int, contentStart, contentEnd int64) {
-	// 工作协程产生于流式下载, 其 panic 会直接终止整个进程
-	// （goroutine 崩溃不受 http handler 内置 recover 的保护）。
-	// 单一 defer: 先关闭该协程专属连接池清理资源, 再恢复 panic 保住进程;
-	// panic 时两者的顺序同样正确（先释放连接, 后捕获）。
+	// panic 兜底由调用方 safeGo 统一负责, 此处 defer 仅负责关闭该协程专属连接池。
+	// 注意: panic 时本 defer 仍会执行(先于外层 safeGo 的 recover), 保证连接池不泄漏。
 	defer func() {
 		if len(stream.Pools) > numTask-1 {
 			if pool := stream.Pools[numTask-1]; pool != nil {
 				pool.Close()
 				stream.Pools[numTask-1] = nil
 			}
-		}
-		if r := recover(); r != nil {
-			log.Printf("协程%d panic 已恢复: %v\n%s", numTask, r, debug.Stack())
 		}
 	}()
 	cacheKey := mediaCacheName(stream.CID, stream.MID)

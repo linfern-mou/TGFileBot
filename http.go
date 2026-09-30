@@ -450,7 +450,7 @@ func (infos *Infos) downloadMediaR(w http.ResponseWriter, client *telegram.Clien
 		default:
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			stat := infos.connectStat(cate)
-			go func() {
+			safeGo(func() {
 				stat.fail(client)
 				if stat.TCPDead.Load() {
 					if err := infos.wakeTCP(client, cate); err != nil {
@@ -459,7 +459,7 @@ func (infos *Infos) downloadMediaR(w http.ResponseWriter, client *telegram.Clien
 						log.Print("TCP 重连成功")
 					}
 				}
-			}()
+			})
 			return false
 		}
 	}
@@ -508,7 +508,7 @@ func handleList(w http.ResponseWriter, r *http.Request) {
 		infos.Cond.L.Unlock()
 
 		workerPool.Add(1)
-		go func(num int, channel string) {
+		safeGo(func() {
 			defer func() {
 				workerPool.Done()
 				searchCount.Add(-1)
@@ -529,7 +529,7 @@ func handleList(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			results[num] = channelResult{item: item, ok: true}
-		}(num, channel)
+		})
 	}
 	workerPool.Wait()
 
@@ -864,16 +864,16 @@ func handleStream(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// 异步清理：不阻塞当前请求 goroutine 返回，使新请求能立即被处理
-			go stream.clean()
+			safeGo(stream.clean)
 			// TCP 断开 → 立即唤醒（无论当前请求成功与否）
 			if infos.connectStat(cate).TCPDead.Load() {
-				go func() {
+				safeGo(func() {
 					if err := infos.wakeTCP(client, cate); err != nil {
 						log.Printf("TCP 重连失败: %+v", err)
 					} else if infos.Conf.Load().DeBUG {
 						log.Print("TCP 重连成功")
 					}
-				}()
+				})
 			}
 		}()
 
@@ -1108,7 +1108,7 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 		workerPool.Add(1)
 		channel = strings.TrimLeft(channel, "@")
 		channel = fmt.Sprintf("@%s", channel)
-		go func(channel string) {
+		safeGo(func() {
 			defer func() {
 				workerPool.Done()
 				searchCount.Add(-1)
@@ -1147,14 +1147,14 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 				return
 			case results <- result:
 			}
-		}(channel)
+		})
 	}
 
 	// 启动一个协程，在所有任务完成后关闭通道
-	go func() {
+	safeGo(func() {
 		workerPool.Wait()
 		close(results)
-	}()
+	})
 
 	var items struct {
 		HasMore bool    `json:"more"`

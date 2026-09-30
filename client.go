@@ -55,7 +55,8 @@ func (infos *Infos) startBot() (err error) {
 	// 注册 Bot 命令处理函数
 	client.On(telegram.OnMessage, handleBotCommand)
 
-	go func() {
+	// 启动一个协程并发设置 Bot 的命令列表, 不影响主流程
+	safeGo(func() {
 		// 先清空默认的命令列表, 确保没有权限的用户什么也看不到
 		_, err := client.SetBotCommands([]*telegram.BotCommand{}, nil)
 		if err != nil {
@@ -178,7 +179,7 @@ func (infos *Infos) startBot() (err error) {
 				continue
 			}
 		}
-	}()
+	})
 
 	if conf.DeBUG {
 		log.Printf("Bot 启动成功")
@@ -274,7 +275,7 @@ func (infos *Infos) startUserBot(phone string) (err error) {
 
 		// 在协程中执行阻塞的登录命令; LoginMu 的所有权移交给该协程,
 		// 直到登录成功或失败后才释放, 期间新的登录请求会被 TryLock 拒绝
-		go func() {
+		safeGo(func() {
 			defer infos.LoMu.Unlock()
 			status, err := infos.UserClient.Load().Login(phone, &telegram.LoginOptions{
 				CodeCallback:     infos.code, // 指定验证码回调函数
@@ -298,7 +299,7 @@ func (infos *Infos) startUserBot(phone string) (err error) {
 					return
 				}
 			}
-		}()
+		})
 	}
 	return nil
 }
@@ -358,7 +359,7 @@ func (infos *Infos) startUserBotQR() (err error) {
 		sendMS(nil, "正在请求登录二维码...", nil, 60)
 
 		// 启动登录流程（会阻塞, 直到登录完成或失败）; LoginMu 所有权移交给该协程
-		go func() {
+		safeGo(func() {
 			defer infos.LoMu.Unlock()
 
 			qr, err := infos.UserClient.Load().QRLogin(infos.selectionsQR())
@@ -405,7 +406,7 @@ func (infos *Infos) startUserBotQR() (err error) {
 				infos.resetStatus()
 				return
 			}
-		}()
+		})
 	}
 
 	return nil
@@ -903,7 +904,7 @@ func (infos *Infos) list(channel string, page, limit int, offset int32, filter i
 	items.ID = channel
 
 	if TCPDead {
-		go func() {
+		safeGo(func() {
 			status := infos.connectStat("user")
 			status.fail(infos.UserClient.Load())
 			if status.TCPDead.Load() {
@@ -913,7 +914,7 @@ func (infos *Infos) list(channel string, page, limit int, offset int32, filter i
 					log.Print("TCP 重连成功")
 				}
 			}
-		}()
+		})
 	}
 	return items, nil
 }
@@ -1139,14 +1140,14 @@ func (infos *Infos) handleMs(params HandleMs) (result *MsCache, err error) {
 		ms, err := client.GetMessages(channelInfo.value, param)
 		if err != nil {
 			// 异步尝试重连, 使后续请求到达时连接可能已恢复
-			go func() {
+			safeGo(func() {
 				stat.fail(client)
 				if err := infos.wakeTCP(client, params.Cate); err != nil {
 					log.Printf("TCP 重连失败: %+v", err)
 				} else if debug {
 					log.Print("TCP 重连成功")
 				}
-			}()
+			})
 			return result, err
 		}
 
@@ -1207,7 +1208,7 @@ func (infos *Infos) refreshMs(client *telegram.Client, version int64, params Han
 		Context: params.Ctx,
 	})
 	if err != nil {
-		go func() {
+		safeGo(func() {
 			status := infos.connectStat(params.Cate)
 			status.fail(client)
 			if status.TCPDead.Load() {
@@ -1217,7 +1218,7 @@ func (infos *Infos) refreshMs(client *telegram.Client, version int64, params Han
 					log.Print("TCP 重连成功")
 				}
 			}
-		}()
+		})
 		log.Printf("刷新文件引用失败: %+v", err)
 		return src, err
 	}
@@ -1287,7 +1288,7 @@ func (infos *Infos) handleChannel(channel string, hash ...int64) (result Channel
 			}
 			values, err := client.ResolvePeer(channel)
 			if err != nil {
-				go func() {
+				safeGo(func() {
 					status := infos.connectStat("user")
 					status.fail(client)
 					if status.TCPDead.Load() {
@@ -1297,7 +1298,7 @@ func (infos *Infos) handleChannel(channel string, hash ...int64) (result Channel
 							log.Print("TCP 重连成功")
 						}
 					}
-				}()
+				})
 				log.Printf("频道解析失败: %+v", err)
 				return result, err
 			}
@@ -1398,7 +1399,7 @@ func (infos *Infos) handleComments(mid, offset int32, page, limit int, base []te
 		})
 
 		if err != nil {
-			go func() {
+			safeGo(func() {
 				status := infos.connectStat("user")
 				status.fail(client)
 				if status.TCPDead.Load() {
@@ -1408,7 +1409,7 @@ func (infos *Infos) handleComments(mid, offset int32, page, limit int, base []te
 						log.Print("TCP 重连成功")
 					}
 				}
-			}()
+			})
 			log.Printf("获取评论消息失败: cid=%d, mid=%d, err=%v", src.Channel.ID, mid, err)
 			return ms, false, err
 		}

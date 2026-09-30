@@ -56,12 +56,12 @@ func handleBotCommand(m *telegram.NewMessage) error {
 
 	// 以 / 开头的命令消息，1分钟后自动删除
 	if strings.HasPrefix(text, "/") {
-		go func() {
+		safeGo(func() {
 			time.Sleep(60 * time.Second)
 			if _, err := m.Delete(); err != nil {
 				log.Printf("删除命令消息失败: %+v", err)
 			}
-		}()
+		})
 	}
 
 	if m.Channel == nil {
@@ -936,12 +936,12 @@ func sendMS(m *telegram.NewMessage, src any, params *telegram.SendOptions, wait 
 			log.Printf("发送消息失败: %+v", err)
 		}
 		if len(wait) > 0 && wait[0] > 0 && ms != nil {
-			go func() {
+			safeGo(func() {
 				time.Sleep(time.Duration(wait[0]) * time.Second)
 				if _, err = ms.Delete(); err != nil {
 					log.Printf("删除消息失败: %+v", err)
 				}
-			}()
+			})
 		}
 		return
 	case botClient != nil:
@@ -950,12 +950,12 @@ func sendMS(m *telegram.NewMessage, src any, params *telegram.SendOptions, wait 
 			log.Printf("发送消息失败: %+v", err)
 		}
 		if len(wait) > 0 && wait[0] > 0 && ms != nil {
-			go func() {
+			safeGo(func() {
 				time.Sleep(time.Duration(wait[0]) * time.Second)
 				if _, err = ms.Delete(); err != nil {
 					log.Printf("删除消息失败: %+v", err)
 				}
-			}()
+			})
 		}
 		return
 	}
