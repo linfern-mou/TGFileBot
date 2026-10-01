@@ -1094,23 +1094,23 @@ func (infos *Infos) handleMs(params HandleMs) (result *MsCache, err error) {
 	// 首页列表/搜索请求（无消息 ID、无翻页游标）属于"新鲜数据"类请求,
 	// 缓存命中需接受较短的 TTL, 使新发布的文件能及时在首页出现;
 	// 锚点类请求（带 MIDs/OffsetID）则保持长期命中以稳定翻页
-	freshReq := lenMIDs == 0 && params.OffsetID == 0
+	freshDo := lenMIDs == 0 && params.OffsetID == 0
 
 	// 不同 Limit 的请求不能共用同一份缓存, 否则会返回条数与请求不符的结果（见 kname 说明）
 	kname += ":limit=" + strconv.Itoa(params.Limit)
 
+	hit := false
 	infos.Mutex.RLock()
 	result, ok := infos.MsCache[kname]
 	infos.Mutex.RUnlock()
 
 	// hit 的判断与 result.Time 的更新必须在同一把锁内完成：Time 可能被
 	// refreshMs 或流式下载完成后的缓存回写并发更新（Mes 本身是原子快照, 无需锁保护读取）
-	hit := false
 	if ok {
 		infos.Mutex.Lock()
 		mes := result.load()
 		if len(mes) > 0 {
-			if freshReq {
+			if freshDo {
 				// 首页请求只接受短 TTL 内的结果, 过期即重新拉取, 保证新内容及时可见
 				if time.Since(result.Time) < listFreshTTL {
 					hit = true
@@ -1160,7 +1160,7 @@ func (infos *Infos) handleMs(params HandleMs) (result *MsCache, err error) {
 		}
 		result = &MsCache{Time: time.Now(), Cate: params.Cate, Username: channelInfo.Username}
 		result.setMes(ms)
-		if freshReq {
+		if freshDo {
 			// 首页列表/搜索: 缓存一切非空结果（含不足一页的末尾页), 结合短 TTL 命中
 			if len(ms) > 0 {
 				infos.Mutex.Lock()
