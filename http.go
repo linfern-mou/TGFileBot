@@ -354,7 +354,7 @@ func handlePic(w http.ResponseWriter, r *http.Request) {
 	var actualThumb telegram.PhotoSize
 	var maxSize int32
 
-	updateMax := func(s telegram.PhotoSize) {
+	switchMax := func(s telegram.PhotoSize) {
 		switch sz := s.(type) {
 		case *telegram.PhotoSizeObj:
 			if sz.Size > maxSize {
@@ -383,13 +383,13 @@ func handlePic(w http.ResponseWriter, r *http.Request) {
 	case *telegram.MessageMediaPhoto:
 		if p, ok := m.Photo.(*telegram.PhotoObj); ok {
 			for _, s := range p.Sizes {
-				updateMax(s)
+				switchMax(s)
 			}
 		}
 	case *telegram.MessageMediaDocument:
 		if d, ok := m.Document.(*telegram.DocumentObj); ok {
 			for _, s := range d.Thumbs {
-				updateMax(s)
+				switchMax(s)
 			}
 		}
 	}
@@ -404,7 +404,9 @@ func handlePic(w http.ResponseWriter, r *http.Request) {
 
 	buf := new(bytes.Buffer)
 	// 下载→引用过期刷新→TCP 断开唤醒的公共重试逻辑, 与 handleStream 小文件分支共用
+	// 封面使用普通 DC 端点, 避免 media DC 不可达时握手超时后才回退。
 	if !infos.downloadMediaR(w, client, cate, &src, param, msCache, buf, &telegram.DownloadOptions{
+		NoMediaDC: true,
 		ThumbOnly: true,
 		ThumbSize: actualThumb,
 		Buffer:    buf,
@@ -761,7 +763,9 @@ func handleStream(w http.ResponseWriter, r *http.Request) {
 		clientIP := handleClientIP(r)
 		log.Printf("正在处理来自 %s 的请求, 开始下载, cid=%d, mid=%d, name=%s", clientIP, params.CID, params.MID, fileName)
 		buf := new(bytes.Buffer)
+		// 与封面一致, 小文件直接使用普通 DC, 不等待 media DC 握手回退。
 		if !infos.downloadMediaR(w, client, cate, &src, param, msCache, buf, &telegram.DownloadOptions{
+			NoMediaDC: true,
 			Buffer:    buf,
 			ChunkSize: int32(chunkSize),
 			Threads:   workers,
